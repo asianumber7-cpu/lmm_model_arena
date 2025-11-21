@@ -1,0 +1,7 @@
+pip install streamlit matplotlib transformers torch pillow
+
+pip install seaborn
+
+pip install sentencepiece protobuf
+
+streamlit run app.py
