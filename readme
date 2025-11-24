@@ -33,3 +33,6 @@ if platform.system() == 'Windows':
 else:
     # Docker 컨테이너 내 설치된 나눔고딕 사용
     plt.rcParams['font.family'] = 'NanumGothic'
+
+
+학원컴 느려서 이미지 생성 실패함 램 8기가 이상 활당해서 돌려볼꺼면 각자 돌려보기
