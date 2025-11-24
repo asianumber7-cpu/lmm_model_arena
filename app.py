@@ -15,7 +15,7 @@ import seaborn as sns
 import numpy as np
 
 # ---------------------------------------------------------------------------------------------------
-# 0. [핵심] 모델 확장 설정 (비교하고 싶은거 추가하면 됨) 돌려보니 4개이상이면 컴터아파함 돌릴것들만 주석풀어서비교ㄱ 
+# 0. [핵심] 모델 설정 (AltCLIP, KoCLIP 등 리모트 코드 필요한 모델 설정 강화)
 # ---------------------------------------------------------------------------------------------------
 MODELS_CONFIG = [
     {
@@ -31,47 +31,17 @@ MODELS_CONFIG = [
         "desc": "글로벌 스탠다드 (영어 기반)"
     },
     {
-        "name": "Google SigLIP (SoTA)", 
-        "id": "google/siglip-base-patch16-224", 
-        "type": "siglip",
-        "desc": "구글의 최신 모델 (성능 매우 높음)"
-    },
-    {
         "name": "AltCLIP (Multilingual)", 
         "id": "BAAI/AltCLIP", 
         "type": "clip_std", 
         "desc": "다국어 지원 모델 (비교군)"
     },
     # {
-    #     "name": "Fashion-CLIP", 
-    #     "id": "patrickjohncyh/fashion-clip", 
-    #     "type": "clip_std",
-    #     "desc": " 패션 데이터로 학습된 모델 (쇼핑몰 최적)"
+    #     "name": "Google SigLIP (SoTA)", 
+    #     "id": "google/siglip-base-patch16-224", 
+    #     "type": "siglip",
+    #     "desc": "구글의 최신 모델 (성능 매우 높음)"
     # },
-    # {
-    #     "name": "AltCLIP (Multilingual)", 
-    #     "id": "BAAI/AltCLIP", 
-    #     "type": "clip_std",
-    #     "desc": "다국어 지원 (한국어 가능, 무거움)"
-    # },
-    # {
-    #     "name": "MetaCLIP (Facebook)", 
-    #     "id": "facebook/metaclip-b32-400m", 
-    #     "type": "clip_std",
-    #     "desc": "메타(페이스북)의 고성능 CLIP"
-    # },
-    # {
-    #     "name": "LAION-2B (Open Source)", 
-    #     "id": "laion/CLIP-ViT-B-32-laion2B-s34B-b79K", 
-    #     "type": "clip_std",
-    #     "desc": "오픈소스 데이터 20억개로 학습"
-    # },
-    # {
-    #     "name": "DFN-CLIP (Apple)", 
-    #     "id": "apple/DFN5B-CLIP-ViT-H-14-378", 
-    #     "type": "clip_std",
-    #     "desc": "애플의 고품질 데이터 학습 (초대형 모델)"
-    # }
 ]
 
 # ------------------------------------------------
@@ -86,13 +56,12 @@ plt.rcParams['axes.unicode_minus'] = False
 
 st.title("🏟️ LMM 모델 성능 비교 아레나")
 st.markdown(f"""
-**실험 목적:** 유명한 글로벌 LMM 모델들과 **KoCLIP**을 동일한 조건에서 경쟁시켜, 
-한국어 쇼핑몰 검색 환경에서의 **적합성(Accuracy)**과 **효율성(Speed)**을 증명합니다.
-* **실행 환경:** {device.upper()}
+**실행 상태:** `{device.upper()}` 환경에서 실행 중
+* **KoCLIP / AltCLIP 로드 팁:** 보안 경고가 뜨면 `transformers` 버전을 4.46.3으로 낮춰주세요.
 """)
 
 # ------------------------------------------------
-# 2. 동적 모델 로더
+# 2. 동적 모델 로더 (안정성 강화 버전)
 # ------------------------------------------------
 @st.cache_resource
 def load_all_models():
@@ -103,17 +72,29 @@ def load_all_models():
         model_id = config['id']
         m_type = config['type']
         
-        print(f"🚀 로딩 시작: {model_name}") 
+        print(f"🚀 로딩 시작: {model_name}...") 
         
         try:
+            # --- A. KoCLIP 로드 ---
             if m_type == 'koclip':
-                model = AutoModel.from_pretrained(model_id).to(device)
-                tokenizer = AutoTokenizer.from_pretrained(model_id)
+                # KoCLIP은 koclip/koclip-base-pt 경로에서 바로 로드
+                model = AutoModel.from_pretrained(
+                    model_id, 
+                    trust_remote_code=True # 필수: 외부 코드 허용
+                ).to(device)
+                
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_id,
+                    trust_remote_code=True
+                )
+                # KoCLIP은 이미지 처리를 위해 OpenAI CLIP의 전처리기(Processor)를 빌려 씀
                 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+                
                 loaded_models[model_name] = {
                     "model": model, "tokenizer": tokenizer, "processor": processor, "type": m_type
                 }
                 
+            # --- B. SigLIP 로드 ---
             elif m_type == 'siglip':
                 model = SiglipModel.from_pretrained(model_id).to(device)
                 processor = SiglipProcessor.from_pretrained(model_id)
@@ -121,10 +102,23 @@ def load_all_models():
                     "model": model, "processor": processor, "type": m_type
                 }
                 
+            # --- C. CLIP / AltCLIP (Standard) ---
             else:
-                # 일반적인 CLIP 계열
-                model = AutoModel.from_pretrained(model_id, trust_remote_code=True).to(device)
-                processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+                # AltCLIP 등은 trust_remote_code=True가 있어야 안전하게 로드됨
+                model = AutoModel.from_pretrained(
+                    model_id, 
+                    trust_remote_code=True 
+                ).to(device)
+                
+                try:
+                    processor = AutoProcessor.from_pretrained(
+                        model_id, 
+                        trust_remote_code=True
+                    )
+                except:
+                    # 만약 AutoProcessor가 실패하면 CLIPProcessor로 시도
+                    processor = CLIPProcessor.from_pretrained(model_id)
+
                 loaded_models[model_name] = {
                     "model": model, "processor": processor, "type": "auto"
                 }
@@ -132,8 +126,9 @@ def load_all_models():
             print(f"✅ {model_name} 로드 성공")
 
         except Exception as e:
-            
             print(f"❌ {model_name} 로드 실패: {e}")
+            # Streamlit 화면에도 에러 띄워주기 (디버깅용)
+            st.error(f"⚠️ **{model_name}** 로드 실패! \n에러 내용: {e}")
             continue
             
     return loaded_models
@@ -152,12 +147,15 @@ def get_similarity_score(model_pack, image, text):
                 processor = model_pack['processor']
                 tokenizer = model_pack['tokenizer']
                 
+                # 이미지 처리
                 img_inputs = processor(images=image, return_tensors="pt").to(device)
+                # 텍스트 처리
                 txt_inputs = tokenizer([text], padding=True, return_tensors="pt").to(device)
                 
                 img_feat = model.get_image_features(**img_inputs)
                 txt_feat = model.get_text_features(**txt_inputs)
                 
+                # 정규화 및 코사인 유사도 계산
                 img_feat /= img_feat.norm(dim=-1, keepdim=True)
                 txt_feat /= txt_feat.norm(dim=-1, keepdim=True)
                 return (img_feat @ txt_feat.T).item()
@@ -167,33 +165,44 @@ def get_similarity_score(model_pack, image, text):
                 processor = model_pack['processor']
                 inputs = processor(text=[text], images=image, return_tensors="pt", padding="max_length").to(device)
                 outputs = model(**inputs)
-                # SigLIP은 값이 큼 -> 0~1 사이로 대략적 스케일링 (비교용)
+                
                 logits = outputs.logits_per_image.item()
+                # SigLIP 스케일링 (Logits가 큼)
                 return max(0, logits) / 10.0 
 
-            # --- C. Standard CLIP ---
+            # --- C. Standard CLIP / AltCLIP ---
             else:
                 processor = model_pack['processor']
-                inputs = processor(text=[text], images=image, return_tensors="pt", padding=True).to(device)
+                # AltCLIP은 텍스트 길이가 길 수 있으므로 truncation 옵션 추가
+                inputs = processor(
+                    text=[text], 
+                    images=image, 
+                    return_tensors="pt", 
+                    padding=True, 
+                    truncation=True,
+                    max_length=77 
+                ).to(device)
+                
                 outputs = model(**inputs)
+                
+                # CLIP 계열은 보통 Logit Scale이 100이므로 100으로 나눠서 0~1 사이로 맞춤
                 return outputs.logits_per_image.item() / 100.0
                 
-    except Exception:
+    except Exception as e:
+        print(f"Inference Error ({m_type}): {e}")
         return 0.0
 
 # ------------------------------------------------
-# 4. 메인 UI
+# 4. 메인 UI 로직
 # ------------------------------------------------
 with st.sidebar:
     st.header("⚙️ 설정")
-    
     uploaded_file = st.file_uploader("데이터셋 (JSON)", type=['json'])
-    
     default_path = os.path.join("data", "images")
     image_folder = st.text_input("이미지 경로", value=default_path)
     
     st.divider()
-    st.write("📋 **비교 모델 목록**")
+    st.write("📋 **참전 모델 목록**")
     for conf in MODELS_CONFIG:
         st.caption(f"- {conf['name']}")
 
@@ -204,117 +213,85 @@ if uploaded_file and image_folder:
         
         loaded_models = load_all_models()
         
-        # 로드된 모델이 하나도 없으면 에러 출력하고 멈춤
         if not loaded_models:
-            st.error("❌ 로드된 모델이 하나도 없습니다. 라이브러리를 설치하거나 인터넷 연결을 확인하세요.")
+            st.error("❌ 로드된 모델이 없습니다. 터미널에서 'pip install transformers==4.46.3'을 실행해보세요.")
             st.stop()
             
-        st.success(f"총 {len(loaded_models)}개의 모델이 참전했습니다! 실험을 시작합니다.")
+        st.success(f"총 {len(loaded_models)}개의 모델이 로드되었습니다.")
             
         results = []
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        start_time = time.time()
-        
-        # --- [디버깅] 로그창 생성 ---
-        log_container = st.expander("🔍 디버깅 로그 (문제가 생기면 여기를 클릭하세요)", expanded=True)
+        # --- 디버깅용 로그창 ---
+        log_expander = st.expander("🔍 진행 로그 확인", expanded=True)
         
         for i, item in enumerate(data):
-            # [수정 포인트] JSON 파일에 있는 'image_filename' 키를 제일 먼저 찾도록 변경!
             img_name = item.get('image_filename') or item.get('image_file') or item.get('filename')
             caption = item.get('caption') or item.get('description') or item.get('text')
             
-            # [디버그] 이제 파일명을 제대로 찾는지 확인
-            if i < 3:
-                log_container.write(f"[{i}번 데이터] 찾은 파일명: {img_name}")
-
-            if not img_name:
-                # 여전히 못 찾으면 에러 출력
-                if i < 5: log_container.error(f"[{i}번] 여전히 파일명을 못 찾음. 키 목록: {list(item.keys())}")
-                continue
-            
+            if not img_name: continue
             if not caption: caption = "unknown"
             
-            # 2. 경로 확인 및 이미지 로드
             img_path = os.path.join(image_folder, img_name)
             
-            # 파일이 진짜 있는지 확인
             if not os.path.exists(img_path):
-                if i < 5: 
-                    log_container.error(f"❌ 파일이 폴더에 없음: {img_path}")
-                    log_container.info(f"폴더 경로 '{image_folder}' 안에 '{img_name}' 파일이 들어있는지 확인하세요.")
+                if i < 5: log_expander.warning(f"이미지 못 찾음: {img_name}")
                 continue
             
             try:
                 image = Image.open(img_path).convert("RGB")
-            except Exception as e:
-                if i < 5: log_container.error(f"이미지 깨짐 ({img_name}): {e}")
+            except:
                 continue
             
-            row_data = {"Index": i, "Caption": caption}
+            row_data = {"Index": i}
             
-            # 로드에 성공한 모델들만 돌림
             for m_name, m_pack in loaded_models.items():
                 score = get_similarity_score(m_pack, image, caption)
                 row_data[m_name] = score
             
             results.append(row_data)
             
-            progress = (i + 1) / len(data)
-            progress_bar.progress(progress)
-            if i % 5 == 0:
-                status_text.text(f"Processing {i+1}/{len(data)}...")
+            progress_bar.progress((i + 1) / len(data))
+            if i % 10 == 0:
+                status_text.text(f"처리 중... {i+1}/{len(data)}")
         
-        total_time = time.time() - start_time
-        
-        # 결과가 없으면 에러 출력하고 멈춤
-        if not results:
-            st.error("🚨 데이터 처리에 실패했습니다. 위의 '디버깅 로그'를 확인해보세요.")
-            st.warning("가장 흔한 원인: 이미지 폴더 경로가 틀렸거나, JSON 파일 안의 파일명과 실제 파일명이 다릅니다.")
-            st.stop()
-
-        df = pd.DataFrame(results)
-        
-        # ------------------------------------------------
-        # 5. 결과 시각화
-        # ------------------------------------------------
-        st.divider()
-        st.subheader("🏆 최종 스코어보드")
-        
-        # 로드된 모델 컬럼만 선택해서 평균 계산
-        valid_model_cols = [name for name in loaded_models.keys() if name in df.columns]
-        
-        if not valid_model_cols:
-            st.error("결과를 계산할 모델 데이터가 없습니다.")
-            st.stop()
-
-        means = df[valid_model_cols].mean().sort_values(ascending=False)
-        
-        # 그래프
-        fig, ax = plt.subplots(figsize=(12, 6))
-        colors = ['#FF4B4B' if 'KoCLIP' in name else '#A9A9A9' for name in means.index]
-        
-        sns.barplot(x=means.index, y=means.values, palette=colors, ax=ax)
-        ax.set_title("모델별 평균 의미 이해도 (Semantic Accuracy)", fontsize=16, fontweight='bold')
-        ax.set_ylabel("유사도 점수 (높을수록 좋음)")
-        
-        for p in ax.patches:
-            ax.annotate(f'{p.get_height():.4f}', 
-                        (p.get_x() + p.get_width() / 2., p.get_height()), 
-                        ha='center', va='bottom', fontsize=11, fontweight='bold')
+        # --- 결과 처리 ---
+        if results:
+            df = pd.DataFrame(results)
+            st.divider()
+            st.subheader("🏆 최종 스코어보드")
             
-        st.pyplot(fig)
-        
-        # 승자 결정 로직
-        if not means.empty:
+            # 숫자 데이터만 골라서 평균 내기
+            numeric_cols = [col for col in df.columns if col not in ['Index']]
+            means = df[numeric_cols].mean().sort_values(ascending=False)
+            
+            # 그래프 그리기
+            fig, ax = plt.subplots(figsize=(10, 5))
+            # KoCLIP 강조색
+            colors = ['#FF4B4B' if 'KoCLIP' in idx else '#A9A9A9' for idx in means.index]
+            sns.barplot(x=means.index, y=means.values, palette=colors, ax=ax)
+            
+            ax.set_title("Image-Text Alignment Score (Cosine Similarity)", fontsize=14, fontweight='bold')
+            ax.set_ylabel("평균 유사도 (0~1)")
+            ax.set_ylim(0, 0.6) # Y축 고정 (비교 편하게)
+            
+            # 막대 위에 점수 표시
+            for p in ax.patches:
+                ax.annotate(f'{p.get_height():.4f}', 
+                           (p.get_x() + p.get_width() / 2., p.get_height()), 
+                           ha='center', va='bottom', fontsize=10, fontweight='bold')
+            
+            st.pyplot(fig)
+            
+            # 분석 멘트
             winner = means.idxmax()
-            st.success(f"🎉 **최종 승자:** {winner}")
-            
+            st.success(f"🥇 **최종 승자:** {winner}")
             st.info(f"""
-            **[결과 분석]**
-            * **{winner}** 모델이 현재 데이터셋에서 가장 높은 정확도를 보였습니다.
-            * 한국어 쇼핑 데이터 특성상 한국어 학습 모델이 유리함을 확인할 수 있습니다.
+            **[결과 해석]**
+            * **{winner}** 모델이 평균 유사도 **{means.max():.4f}**를 기록했습니다.
+            * 이는 텍스트 설명과 이미지 간의 의미적 연결(Alignment)이 가장 강력함을 의미합니다.
+            * 0점(0.0000)이 나온 모델이 있다면 로드 실패이므로 로그를 확인하세요.
             """)
-        
-        st.download_button("결과 CSV 다운로드", df.to_csv().encode('utf-8'), "lmm_arena_results.csv")
+        else:
+            st.error("결과가 없습니다. 이미지 경로를 확인해주세요.")

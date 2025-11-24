@@ -1,0 +1,19 @@
+# Git
+.git
+.gitignore
+
+# Python Cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Env (로컬 아나콘다 환경 혼입 방지)
+venv
+env
+.env
+anaconda3
+opt
+
+# Data (용량이 큰 데이터는 빌드 시 제외하고 볼륨 마운트로 처리)
+data/images

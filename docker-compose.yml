@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  lmm-arena:
+    container_name: lmm-model-arena
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      # 1. 호스트의 데이터 폴더를 컨테이너와 동기화 (이미지 업로드 등 반영)
+      - ./data:/app/data
+      # 2. 코드 수정 시 실시간 반영 (개발 편의성)
+      - ./app.py:/app/app.py
+      # 3. Hugging Face 모델 캐시 공유 (중요: 매번 다운로드 방지)
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - TZ=Asia/Seoul
+      # 토크나이저 병렬 처리 경고 억제
+      - TOKENIZERS_PARALLELISM=false
+    restart: unless-stopped
+    
+    # GPU 사용 시 아래 주석 해제 (NVIDIA Docker Toolkit 필요)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
